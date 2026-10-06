@@ -112,3 +112,39 @@ test('wrong password is explained, and the admin from .env.example is the only w
   await page.getByRole('button', { name: 'Entrar' }).click()
   await expect(page.getByRole('alert')).toContainText('E-mail ou senha incorretos.')
 })
+
+test('keyboard only: skip link, dialog focus handling, Escape; no console errors', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  page.on('console', (m) => {
+    // 4xx are expected API answers; COOP is only ignored because the test reaches nginx as http://frontend (not localhost/HTTPS)
+    if (m.type() === 'error' && !/status of 4\d\d|Cross-Origin-Opener-Policy/.test(m.text())) errors.push(m.text())
+  })
+
+  await page.goto('/')
+  await page.getByLabel('E-mail').fill(ADMIN.email)
+  await page.getByLabel('Senha').fill(ADMIN.password)
+  await page.getByLabel('Senha').press('Enter')
+  await expect(page.getByRole('heading', { name: 'Painel de resultados' })).toBeVisible()
+
+  await page.keyboard.press('Tab')
+  await expect(page.getByRole('link', { name: 'Ir para o conteúdo' })).toBeFocused()
+
+  await page.getByRole('link', { name: 'Serviços' }).focus()
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('heading', { name: 'Serviços', exact: true })).toBeVisible()
+
+  const opener = page.getByRole('button', { name: 'Novo serviço' })
+  await opener.focus()
+  await page.keyboard.press('Enter')
+  const dialog = page.getByRole('dialog', { name: 'Novo serviço' })
+  await expect(dialog.getByLabel('Nome')).toBeFocused()
+  for (let i = 0; i < 8; i++) {
+    await page.keyboard.press('Shift+Tab') // focus must wrap inside the dialog, never reach the page behind
+    expect(await page.evaluate(() => document.activeElement?.closest('[role=dialog]') !== null)).toBe(true)
+  }
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+  await expect(opener).toBeFocused()
+  expect(errors).toEqual([])
+})

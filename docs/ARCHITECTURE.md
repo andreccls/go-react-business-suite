@@ -1,8 +1,8 @@
 # Arquitetura
 
-Este documento explica **como o backend está organizado e por quê**, e como o frontend (etapa 2) se encaixa. A filosofia é a de
-Go: pacotes por assunto, interfaces pequenas **declaradas por quem as usa**, sem camadas cerimoniais. As decisões estão em
-[docs/adr](adr).
+Este documento explica **como o backend está organizado e por quê** (§1–§8) e **como o frontend funciona** (§9). A filosofia do backend é a de
+Go: pacotes por assunto, interfaces pequenas **declaradas por quem as usa**, sem camadas cerimoniais; a do frontend, poucas dependências
+e estado de servidor separado do estado de interface. As decisões estão em [docs/adr](adr).
 
 ## 1. Visão geral
 
@@ -10,15 +10,15 @@ Go: pacotes por assunto, interfaces pequenas **declaradas por quem as usa**, sem
 flowchart LR
     subgraph Dev["desenvolvimento (origens diferentes)"]
         direction TB
-        VITE["React + Vite<br/>:5173 (etapa 2)"]
+        VITE["Vite dev server<br/>:5173 → proxy /api"]
     end
     subgraph Prod["produção (mesma origem)"]
         direction TB
-        NGINX["nginx<br/>serve o SPA e faz proxy de /api (etapa 2)"]
+        NGINX["nginx não-root :8080<br/>serve o SPA e faz proxy de /api"]
     end
 
-    VITE -- "HTTP + CORS" --> API
-    NGINX -- "proxy /api → :8080" --> API
+    VITE -- "proxy /api → :8095 (sem CORS)" --> API
+    NGINX -- "proxy /api → api:8080" --> API
 
     subgraph API["backend Go — processo único (cmd/api → internal/app)"]
         direction TB
@@ -194,14 +194,15 @@ o mantêm fiel — sem banco e sem `.env`:
    obrigatórios, **campos não declarados são erro**, formatos `date-time`/`date`/`uuid`).
 3. `TestOpenAPIReferencesResolve` (nenhum `$ref` quebrado, nenhum componente morto) e `TestOpenAPIExamplesMatchTheirSchemas` (os exemplos que o frontend vai copiar são válidos).
 
-## 7. Como o frontend (etapa 2) se conecta
+## 7. Como o frontend se conecta
 
-- **Dev:** SPA em `http://localhost:5173` chamando `http://localhost:8095`. A API já vem com `CORS_ALLOWED_ORIGINS=http://localhost:5173`.
-- **Produção:** o `docker-compose.yml` tem o serviço `frontend` (nginx) **comentado**, pronto para a etapa 2: nginx serve o SPA e
-  `location /api/ { proxy_pass http://api:8080/; }`. Mesma origem, sem CORS.
-- **Contrato:** `GET /openapi.json` (ou `backend/internal/httpapi/openapi.json`) é a fonte de verdade — dá para gerar tipos TypeScript
-  (ex.: `openapi-typescript`). Valores monetários são **centavos inteiros**; instantes são RFC 3339 UTC; dias de calendário (`from`/`to`,
-  séries) são `YYYY-MM-DD` no fuso do negócio, devolvido no campo `timezone`.
+- **Produção (compose):** o serviço `frontend` (nginx não-root, porta de host **8096**) serve o SPA e faz `location /api/ { proxy_pass http://api:8080/; }`.
+  Mesma origem: **sem CORS**. Swagger UI da API em `/api/docs/`. Ver [ADR 0009](adr/0009-nginx-proxy-csp.md).
+- **Dev (`make frontend-dev`):** Vite em contêiner com o **mesmo caminho `/api`**, encaminhado por um proxy do Vite para a API — também sem CORS.
+  Se alguém apontar `VITE_API_BASE` direto para `http://localhost:8095`, aí vale o `CORS_ALLOWED_ORIGINS` da API.
+- **Contrato:** `backend/internal/httpapi/openapi.json` é a fonte da verdade; os tipos do front são **gerados** dele e conferidos no CI
+  ([ADR 0007](adr/0007-generated-api-types.md)). Dinheiro = **centavos inteiros**; instantes = RFC 3339 UTC; dias de calendário (`from`/`to`,
+  séries) = `YYYY-MM-DD` no fuso do negócio.
 
 ## 8. Como adicionar um recurso (passo a passo)
 
@@ -211,3 +212,93 @@ o mantêm fiel — sem banco e sem `.env`:
 3. Em `internal/httpapi`: declare a interface do serviço em `server.go`, acrescente linhas em `routes()`, escreva os handlers, um `case` em `fail`.
 4. Atualize `openapi.json` (paths + schemas + exemplos): os testes de contrato dizem exatamente o que faltou.
 5. Ligue no `internal/app/app.go`.
+
+## 9. Frontend (React + TypeScript + Vite)
+
+### 9.1 Estrutura
+
+```
+frontend/
+├── Dockerfile, nginx/                # build em dois estágios → nginx não-root, CSP, proxy /api
+├── vite.config.ts                    # dev proxy /api, Vitest, gate de cobertura
+├── eslint.config.js                  # typescript-eslint + react-hooks + jsx-a11y
+└── src/
+    ├── main.tsx · App.tsx            # providers (Query, Router, Auth) · tabela de rotas
+    ├── api/
+    │   ├── schema.d.ts               # GERADO do openapi.json (npm run gen:api) — não editar
+    │   ├── types.ts                  # apelidos legíveis dos tipos gerados
+    │   ├── client.ts                 # fetch fino: RFC 9457 → ApiError, refresh de fila única, 1 retry
+    │   ├── endpoints.ts              # uma função tipada por operação do contrato
+    │   ├── hooks.ts                  # TanStack Query: leituras (keys) e escritas (invalidação)
+    │   └── errors.ts                 # ApiError + mensagens pt-BR por `code`
+    ├── auth/                         # session.ts (tokens) · AuthContext (sessão) · RequireAuth/RequireAdmin
+    ├── lib/                          # datetime (fuso do negócio) · format (R$, datas) · validation · queryClient
+    ├── components/                   # Layout, Modal, ConfirmDialog, Field, States, Pagination, StatusBadge, DailyChart
+    ├── pages/                        # Login, Dashboard, Appointments(+Form), Services, Customers, Users, NotFound
+    ├── styles.css                    # tokens (claro/escuro por prefers-color-scheme) e componentes
+    └── test/                         # setup (MSW), mockApi (fake com estado, tipado pelo contrato), utils
+```
+
+Dependências entre camadas: `pages → components, api/hooks, auth, lib`; `api/hooks → api/index (cliente + endpoints) → auth/session`;
+`lib` não importa nada do app. Páginas **não chamam `fetch`**: só hooks.
+
+### 9.2 Autenticação e refresh (sequência)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant UI as Tela (hook de query)
+    participant C as api/client
+    participant S as auth/session
+    participant A as API (via nginx)
+
+    Note over S: access token: só memória<br/>refresh token: sessionStorage
+    UI->>C: GET /v1/services
+    C->>A: GET + Authorization: Bearer access
+    A-->>C: 401 invalid_token (access expirou)
+    alt já existe um refresh em voo
+        C->>C: aguarda a MESMA promessa (fila única)
+    else primeiro 401
+        C->>A: POST /v1/auth/refresh {refresh_token}
+        A-->>C: 200 novo par (o refresh antigo foi gasto)
+        C->>S: set(novo par)
+    end
+    C->>A: repete GET com o novo access (1 vez)
+    A-->>C: 200
+    C-->>UI: dados
+
+    Note over C,A: Refresh recusado (401: expirado, REUSADO ou revogado)
+    C->>A: POST /v1/auth/refresh
+    A-->>C: 401 invalid_token
+    C->>S: clear() → AuthProvider limpa o cache e volta ao /login
+    Note over C,A: Falha de rede / 5xx / 429 no refresh: a sessão é mantida (dá para tentar de novo)
+```
+
+*Reload:* o access token se foi, o refresh token está no `sessionStorage`; a primeira chamada autenticada faz o refresh **antes** de enviar
+(`AuthProvider` chama `/v1/auth/me`). Detalhes e a limitação de XSS: [ADR 0008](adr/0008-token-storage.md).
+
+### 9.3 Estado de servidor e de interface
+
+- **Servidor:** TanStack Query ([ADR 0006](adr/0006-server-state-tanstack-query.md)). Leituras com *key* = recurso + parâmetros; escritas invalidam
+  os recursos afetados (`appointments`, `dashboard`…); depois de um `409` a lista é recarregada, nunca "consertada" no cliente.
+- **Interface:** `useState` local (modal aberto, filtros, página). Busca digitada passa por `useDebounced` (300 ms).
+- **Erros:** todo erro vira `ApiError` (`status`, `code`, `fields`, `requestId`, `retryAfter`); `errorMessage` traduz o `code` para uma frase em
+  português (ex.: `slot_unavailable` → "Esse horário conflita com outro agendamento…"); `422` vira erro **por campo** (`fieldErrorsFrom`).
+- **Permissões:** `staff` não vê "Excluir" nem o menu "Usuários" (`/usuarios` mostra "Acesso restrito"); isso é **conveniência** — quem impõe é a API (`403`),
+  e o front também mostra esse `403` se o papel mudar durante a sessão.
+- **Tempo:** o fuso do negócio vem de `VITE_BUSINESS_TZ` (injetado no *build*, padrão `America/Sao_Paulo`, igual ao `BUSINESS_TZ` do compose). Datas
+  digitadas (dia + hora) viram instante UTC por `zonedToInstant`; instantes viram texto pelo mesmo fuso. "Concluir/Faltou" só habilitam depois do início
+  (relógio do navegador); o servidor é a autoridade (`409 not_started` é tratado).
+
+### 9.4 Como adicionar uma tela (passo a passo)
+
+Exemplo: tela de **Profissionais** (`GET /v1/providers`) depois que o backend a oferecer.
+
+1. **Contrato primeiro:** o backend atualiza `openapi.json` (§8). No front, `make frontend-types` regenera `schema.d.ts`; `make frontend-lint` falha se você esquecer.
+2. **Tipos e chamadas:** apelidos em `src/api/types.ts` (`Provider`, `ProviderQuery`) e as funções em `src/api/endpoints.ts` (`listProviders`, `createProvider`…).
+3. **Hooks:** em `src/api/hooks.ts`, `useProviders(q)` (*key* `['providers', q]`) e as mutações que invalidam `providers` (e o que mais for afetado).
+4. **Página:** `src/pages/ProvidersPage.tsx` usando `Loading`/`ErrorState`/`Empty`, `Field`, `Modal`, `Pagination` e as classes `table.data.stack` (vira *cards* no celular).
+   Mensagens de erro novas: um `code` em `MESSAGES` (`api/errors.ts`). Validação: uma função pura em `lib/validation.ts`.
+5. **Rota e menu:** uma `<Route>` em `App.tsx` (embrulhe com `RequireAdmin` se for só de admin) e um `NavLink` em `components/Layout.tsx`.
+6. **Testes:** rotas no fake `src/test/mockApi.ts` (tipadas com os tipos gerados) e `src/pages/providers.test.tsx` cobrindo lista, vazio, erro, criação com `422`/`409`
+   e a permissão. `make frontend-coverage` mantém o gate; `make lint` checa acessibilidade estática (jsx-a11y).

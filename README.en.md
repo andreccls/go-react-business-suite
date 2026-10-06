@@ -3,9 +3,7 @@
 > ⚠️ **SAMPLE / REFERENCE CODE — NOT A PRODUCTION-READY PRODUCT.** The studio and the data are fictional; every secret in
 > `docker-compose.yml`/`.env.example` is development-only. Known limitations: [README.md](README.md#limitações-conhecidas-e-próximos-passos) (in Portuguese).
 
-> 🚧 **Stage 1 of 2:** the Go backend is complete and verified; the React frontend is next (`frontend/` is reserved, the compose service is commented out).
-
-A small-business suite for a fictional single-provider studio: **service catalog** (price in cents, duration, active flag), **customers**,
+A small-business suite for a fictional single-provider studio (Go API + React SPA): **service catalog** (price in cents, duration, active flag), **customers**,
 **appointments** (end time derived from the service duration; price/duration/name frozen as a snapshot; no overlaps, no past or inactive-service bookings;
 `scheduled → completed | cancelled | no_show`) and a **results dashboard** (KPIs, daily series, top services, upcoming appointments).
 
@@ -17,14 +15,23 @@ A small-business suite for a fictional single-provider studio: **service catalog
   response in every API test is validated against its schema. CORS is configurable; in production nginx proxies `/api` (no CORS needed).
 - **Tests:** 227 test cases, `-race`, 97.7% total coverage (domain and services 100%, gate ≥ 90%); the same contract suite runs on the in-memory fake and on real
   PostgreSQL. [docs/TESTING.md](docs/TESTING.md).
-- **Docs:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and 5 ADRs in [docs/adr](docs/adr) (stdlib vs framework, non-overlap, snapshot, dashboard aggregations with
-  `EXPLAIN`, auth).
+- **Frontend:** React 19 + TypeScript (strict) + Vite; TanStack Query for server state; a thin fetch client with **single-flight token refresh** (access token in memory, refresh token in
+  `sessionStorage`, [ADR 0008](docs/adr/0008-token-storage.md)); types **generated from `openapi.json`** and verified in CI; pt-BR formatting in the business time zone; light/dark by
+  `prefers-color-scheme`; responsive tables that become cards on phones; own SVG chart with a data table; accessible dialogs, labels, skip link. Served by **non-root nginx** with a strict CSP
+  and a same-origin `/api` proxy ([ADR 0009](docs/adr/0009-nginx-proxy-csp.md)). Bundle: 345 kB JS (**106 kB gzip**).
+- **Frontend tests:** 188 Vitest + Testing Library + MSW cases (fake API typed by the contract), **99.9% lines / 98.1% branches** (gate ≥ 90%, `lib/` and the HTTP client ≥ 95%), ESLint (jsx-a11y) and
+  `tsc` clean; **4 Playwright E2E tests** against the full stack (booking with a `409` conflict, staff permissions, keyboard-only, no console errors).
+- **Docs:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and 10 ADRs in [docs/adr](docs/adr) (stdlib vs framework, non-overlap, snapshot, dashboard aggregations with
+  `EXPLAIN`, auth, server state, generated API types, token storage, nginx/CSP, lightweight dependencies).
 
 ```bash
-make up      # PostgreSQL + API -> http://localhost:8095 (Swagger UI at /docs/)
-make demo    # curl tour; ends by checking the dashboard KPIs against a manual computation
-make test    # unit + PostgreSQL + concurrency, -race, coverage gate
-make lint    # gofmt + go vet + staticcheck
+make up      # PostgreSQL + API + frontend -> app http://localhost:8096 (API :8095, Swagger UI at /docs/ or /api/docs/)
+make demo    # curl tour (empty agenda); checks the dashboard KPIs against a manual computation
+make test    # backend (unit + PostgreSQL + concurrency, -race) and frontend (Vitest), both with coverage gates
+make lint    # gofmt + go vet + staticcheck, ESLint + tsc + generated-types check
+make e2e     # Playwright against the full stack (pulls the official ~1.5 GB image)
 ```
 
-Docker is the only requirement (no Go on the host); a clean clone works without a `.env`. MIT licensed.
+Docker is the only requirement (no Go and no Node on the host); a clean clone works without a `.env`. Sign in at <http://localhost:8096> with the dev admin from `.env.example`
+(`admin@example.com` / `dev-only-admin-password`). Honest limitations (XSS can read the refresh token, shared login rate limit behind nginx, build-time time zone…): see
+[README.md](README.md#limitações-conhecidas-e-próximos-passos) (Portuguese). MIT licensed.
