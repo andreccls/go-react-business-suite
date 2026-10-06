@@ -5,6 +5,8 @@ export
 COMPOSE := docker compose
 GO      := $(COMPOSE) --profile tools run --rm tools
 NODE    := $(COMPOSE) --profile tools run --rm --no-deps node
+# Every frontend target installs from the lockfile first when node_modules is missing/outdated.
+DEPS    := ./scripts/ensure-deps.sh
 # Packages measured by the coverage gate (test helpers are excluded, see docs/TESTING.md).
 COVERPKG = $$(go list ./internal/... | grep -v -e /testdb -e /repotest | paste -sd, -)
 
@@ -50,26 +52,26 @@ demo: ## Tour of the running API with curl (needs `make up`, curl and jq)
 
 # ---- frontend (Node 22 in a container; node_modules lives in a named volume) ----
 frontend-install: ## npm ci (clean install from the lockfile)
-	$(NODE) npm ci --no-fund --no-audit
+	$(NODE) sh -c 'npm ci --no-fund --no-audit && md5sum package-lock.json | cut -d" " -f1 > node_modules/.lock-hash'
 
 frontend-test: ## Vitest (no coverage)
-	$(NODE) npm test
+	$(NODE) sh -c '$(DEPS) && npm test'
 
 frontend-coverage: ## Vitest with coverage; fails below the thresholds in frontend/vite.config.ts
-	$(NODE) npm run coverage
+	$(NODE) sh -c '$(DEPS) && npm run coverage'
 
 frontend-lint: ## ESLint + tsc --noEmit + generated API types up to date with openapi.json
-	$(NODE) sh -c 'npm run lint && npm run typecheck && npm run check:api'
+	$(NODE) sh -c '$(DEPS) && npm run lint && npm run typecheck && npm run check:api'
 
 frontend-types: ## Regenerate frontend/src/api/schema.d.ts from the backend's openapi.json
-	$(NODE) npm run gen:api
+	$(NODE) sh -c '$(DEPS) && npm run gen:api'
 
 frontend-build: ## Production bundle (frontend/dist)
-	$(NODE) npm run build
+	$(NODE) sh -c '$(DEPS) && npm run build'
 
 frontend-dev: ## Vite dev server with HMR on http://localhost:$(or $(DEV_PORT),5180) (needs `make up` for the API)
 	$(COMPOSE) up -d --wait api
-	$(COMPOSE) --profile tools run --rm --no-deps --service-ports node sh -c 'npm ci --no-fund --no-audit && npm run dev -- --port 5173'
+	$(COMPOSE) --profile tools run --rm --no-deps --service-ports node sh -c '$(DEPS) && npm run dev -- --port 5173'
 
 e2e: ## Playwright end-to-end test against the full stack (needs `make up`; pulls a ~1.5 GB image, see docs/TESTING.md)
 	WEB_PORT=$(or $(WEB_PORT),8096) ./e2e/run.sh
