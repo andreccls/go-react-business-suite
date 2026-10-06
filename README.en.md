@@ -20,7 +20,7 @@ A small-business suite for a fictional single-provider studio (Go API + React SP
   `prefers-color-scheme`; responsive tables that become cards on phones; own SVG chart with a data table; accessible dialogs, labels, skip link. Served by **non-root nginx** with a strict CSP
   and a same-origin `/api` proxy ([ADR 0009](docs/adr/0009-nginx-proxy-csp.md)). Bundle: 345 kB JS (**106 kB gzip**).
 - **Frontend tests:** 188 Vitest + Testing Library + MSW cases (fake API typed by the contract), **99.9% lines / 98.1% branches** (gate ≥ 90%, `lib/` and the HTTP client ≥ 95%), ESLint (jsx-a11y) and
-  `tsc` clean; **4 Playwright E2E tests** against the full stack (booking with a `409` conflict, staff permissions, keyboard-only, no console errors).
+  `tsc` clean; **5 Playwright E2E tests** against the full stack (booking with a `409` conflict, staff permissions, keyboard-only, no console errors, no horizontal scroll on phones).
 - **Docs:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and 10 ADRs in [docs/adr](docs/adr) (stdlib vs framework, non-overlap, snapshot, dashboard aggregations with
   `EXPLAIN`, auth, server state, generated API types, token storage, nginx/CSP, lightweight dependencies).
 

@@ -247,7 +247,7 @@ instantes são RFC 3339 UTC; `from`/`to` são datas `YYYY-MM-DD` **inclusivas** 
 |---|---|
 | **Backend** (Go, `-race`, PostgreSQL real) | **227** casos, 0 falhas · cobertura **97,7%** (gate ≥ 90%; domínio e serviços **100%**) · `go vet` e `staticcheck` limpos |
 | **Frontend** (Vitest + Testing Library + MSW) | **188** casos em 15 arquivos, 0 falhas · cobertura **99,9%** linhas / 98,1% *branches* / 96,5% funções (gate ≥ 90%; `lib/` e `api/client.ts` com gate ≥ 95%, medem **100%** de linhas) · ESLint (jsx-a11y) e `tsc --noEmit` strict limpos |
-| **E2E** (Playwright, Chromium, nginx + API + PostgreSQL reais) | **4** casos: fluxo completo com `409`, permissões de `staff` + reload, senha errada, **só teclado** + console sem erros |
+| **E2E** (Playwright, Chromium, nginx + API + PostgreSQL reais) | **5** casos: fluxo completo com `409`, permissões de `staff` + reload, senha errada, **só teclado** + console sem erros, **sem rolagem horizontal no celular** |
 | Tipos gerados × `openapi.json` | verificados no `make lint` e no CI (`check:api`) |
 | *Bundle* de produção | JS **344,7 kB (106,5 kB gzip)** · CSS 9,4 kB (2,7 kB gzip) · imagem do front ~82 MB (nginx não-root) |
 
@@ -348,5 +348,5 @@ dependencies) and a **React 19 + TypeScript + Vite** frontend (TanStack Query, 4
 even under concurrency**, guaranteed by a PostgreSQL `EXCLUDE USING gist` constraint and proven by a real concurrency test (30 simultaneous
 requests → 1 × 201 + 29 × 409); price and duration are **snapshotted** at booking time; JWT access + **rotating refresh tokens** (the SPA keeps the access token in memory,
 shares one in-flight refresh among concurrent requests, and logs out on a refused/reused refresh); RFC 9457 errors; the frontend's types are **generated from the OpenAPI
-contract** and checked in CI; nginx (non-root, strict CSP) serves the SPA and proxies `/api` (no CORS). 227 backend + 188 frontend tests, 4 Playwright E2E tests
+contract** and checked in CI; nginx (non-root, strict CSP) serves the SPA and proxies `/api` (no CORS). 227 backend + 188 frontend tests, 5 Playwright E2E tests
 against the full compose stack. Run `make up` (Docker only — no Go or Node on the host) and open <http://localhost:8096>. See [README.en.md](README.en.md).

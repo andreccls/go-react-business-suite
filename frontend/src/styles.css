@@ -84,12 +84,13 @@ a { color: var(--primary); }
   /* keep the e-mail for screen readers, free the row for the role and the logout button */
   .user-email { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 }
-.page { max-width: 1120px; margin: 0 auto; padding: 20px 16px 48px; display: grid; gap: 20px; }
+.page { max-width: 1120px; margin: 0 auto; padding: 20px 16px 48px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
 .page-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; box-shadow: var(--shadow); }
 .card > h2 { margin-bottom: 12px; }
-.grid-2 { display: grid; gap: 20px; grid-template-columns: 1fr; }
-@media (min-width: 900px) { .grid-2 { grid-template-columns: 1fr 1fr; } }
+.grid-2 { display: grid; gap: 20px; grid-template-columns: minmax(0, 1fr); }
+.grid-2 > * { min-width: 0; } /* a wide child (the chart) must scroll inside its card, not widen the page */
+@media (min-width: 900px) { .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .muted { color: var(--muted); }
 
 /* ---- buttons / forms ---- */

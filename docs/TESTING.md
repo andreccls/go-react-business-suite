@@ -79,7 +79,7 @@ Medido com `make frontend-coverage` (Node 22, Vitest 3, jsdom, cobertura V8):
 | `src/api/errors.ts` · `src/components` · `src/pages` | 100% · 100% · 100% linhas (funções de `pages`: 92%) |
 | ESLint (typescript-eslint, react-hooks, **jsx-a11y**) · `tsc --noEmit` (strict + `noUncheckedIndexedAccess`) | limpos |
 | Tipos gerados × `openapi.json` (`npm run check:api`) | em dia (o CI falha se divergirem) |
-| E2E (Playwright, Chromium, pilha completa) | **4** passando: `make e2e` |
+| E2E (Playwright, Chromium, pilha completa) | **5** passando: `make e2e` |
 | *Bundle* de produção | JS **344,7 kB (106,5 kB gzip)** · CSS 9,4 kB (2,7 kB gzip) · imagem nginx ~82 MB |
 
 ### O que cada camada testa
@@ -104,7 +104,7 @@ Medido com `make frontend-coverage` (Node 22, Vitest 3, jsdom, cobertura V8):
    formatação (R$, `14:00` a partir de `17:00Z`), estados **vazio**, **erro com "Tentar novamente"** e carregando em toda tela; filtros, busca (*debounce*), paginação, período inválido no painel.
 5. **E2E (`e2e/`, Playwright no contêiner oficial, na rede do compose, contra nginx + API + PostgreSQL reais):** (a) admin cria serviço e dois clientes, agenda, **provoca o 409**,
    vê o contador do painel subir, cancela e tenta excluir o serviço em uso; (b) cria um *staff*, entra como ele: sem "Excluir"/"Usuários", sessão **sobrevive ao reload**, `/usuarios` negado;
-   (c) senha errada; (d) **só teclado**: *skip link*, foco dentro do diálogo (Shift+Tab não escapa), Escape devolve o foco ao botão, **console sem erros** (404/409 esperados e o aviso do COOP em `http://frontend`
+   (c) senha errada; (e) **celular (360 px): nenhuma página precisa de rolagem horizontal** (pegou um bug real de *overflow* no painel, corrigido); (d) **só teclado**: *skip link*, foco dentro do diálogo (Shift+Tab não escapa), Escape devolve o foco ao botão, **console sem erros** (404/409 esperados e o aviso do COOP em `http://frontend`
    são ignorados). `./e2e/run.sh screenshots` regenera `docs/images/`.
 
 ### Gate de cobertura e exclusões (frontend)
