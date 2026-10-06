@@ -17,8 +17,8 @@ import (
 )
 
 var (
-	ctx  = context.Background()
-	boom = errors.New("boom")
+	ctx     = context.Background()
+	errBoom = errors.New("boom")
 	// "now" is Monday 2026-03-02 12:00 UTC (09:00 in São Paulo).
 	t0 = time.Date(2026, 3, 2, 12, 0, 0, 0, time.UTC)
 )
@@ -195,17 +195,17 @@ type (
 )
 
 func (badCustomers) Get(context.Context, string) (customer.Customer, error) {
-	return customer.Customer{}, boom
+	return customer.Customer{}, errBoom
 }
-func (badCatalog) Get(context.Context, string) (catalog.Item, error) { return catalog.Item{}, boom }
+func (badCatalog) Get(context.Context, string) (catalog.Item, error) { return catalog.Item{}, errBoom }
 
 func TestCreatePropagatesCollaboratorErrors(t *testing.T) {
 	f := newFixture(t)
 	in := f.in(t0.Add(time.Hour))
-	if _, err := booking.NewService(f.repo, f.catalog, badCustomers{}, time.UTC, f.svcNow()).Create(ctx, in); !errors.Is(err, boom) {
+	if _, err := booking.NewService(f.repo, f.catalog, badCustomers{}, time.UTC, f.svcNow()).Create(ctx, in); !errors.Is(err, errBoom) {
 		t.Errorf("customers: %v", err)
 	}
-	if _, err := booking.NewService(f.repo, badCatalog{}, f.custs, time.UTC, f.svcNow()).Create(ctx, in); !errors.Is(err, boom) {
+	if _, err := booking.NewService(f.repo, badCatalog{}, f.custs, time.UTC, f.svcNow()).Create(ctx, in); !errors.Is(err, errBoom) {
 		t.Errorf("catalog: %v", err)
 	}
 }

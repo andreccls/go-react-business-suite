@@ -15,9 +15,9 @@ import (
 )
 
 var (
-	ctx  = context.Background()
-	t0   = time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
-	boom = errors.New("boom")
+	ctx     = context.Background()
+	t0      = time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+	errBoom = errors.New("boom")
 )
 
 type writeFails struct {
@@ -27,14 +27,14 @@ type writeFails struct {
 
 func (w writeFails) Create(ctx context.Context, c customer.Customer) error {
 	if w.create {
-		return boom
+		return errBoom
 	}
 	return w.Repository.Create(ctx, c)
 }
 
 func (w writeFails) Update(ctx context.Context, c customer.Customer) error {
 	if w.update {
-		return boom
+		return errBoom
 	}
 	return w.Repository.Update(ctx, c)
 }
@@ -72,7 +72,7 @@ func TestCreateNormalizes(t *testing.T) {
 	if err != nil || empty.Phone != "" || empty.Notes != "" {
 		t.Errorf("optional fields: %+v, %v", empty, err)
 	}
-	if _, err := customer.NewService(writeFails{Repository: memstore.New().Customers(), create: true}, nil).Create(ctx, customer.Input{Name: "Ana", Email: "a@example.com"}); !errors.Is(err, boom) {
+	if _, err := customer.NewService(writeFails{Repository: memstore.New().Customers(), create: true}, nil).Create(ctx, customer.Input{Name: "Ana", Email: "a@example.com"}); !errors.Is(err, errBoom) {
 		t.Errorf("repository error: %v", err)
 	}
 }
@@ -157,7 +157,7 @@ func TestUpdate(t *testing.T) {
 	}
 	failing := customer.NewService(writeFails{Repository: memstore.New().Customers(), update: true}, nil)
 	c, _ := failing.Create(ctx, customer.Input{Name: "Cris", Email: "c@example.com"})
-	if _, err := failing.Update(ctx, c.ID, customer.Patch{}); !errors.Is(err, boom) {
+	if _, err := failing.Update(ctx, c.ID, customer.Patch{}); !errors.Is(err, errBoom) {
 		t.Errorf("repository error: %v", err)
 	}
 }

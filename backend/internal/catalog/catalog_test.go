@@ -15,11 +15,11 @@ import (
 )
 
 var (
-	ctx   = context.Background()
-	t0    = time.Date(2026, 3, 1, 10, 0, 0, 123456789, time.UTC)
-	boom  = errors.New("boom")
-	truth = true
-	lie   = false
+	ctx     = context.Background()
+	t0      = time.Date(2026, 3, 1, 10, 0, 0, 123456789, time.UTC)
+	errBoom = errors.New("boom")
+	truth   = true
+	lie     = false
 )
 
 func newService() *catalog.Service {
@@ -29,7 +29,7 @@ func newService() *catalog.Service {
 // failing/updateFails make one write fail, to exercise the error paths.
 type failing struct{ catalog.Repository }
 
-func (failing) Create(context.Context, catalog.Item) error { return boom }
+func (failing) Create(context.Context, catalog.Item) error { return errBoom }
 
 func fields(err error) []string {
 	var v validation.Errors
@@ -94,7 +94,7 @@ func TestCreateValidation(t *testing.T) {
 			}
 		})
 	}
-	if _, err := catalog.NewService(failing{memstore.New().Catalog()}, nil).Create(ctx, catalog.Input{Name: "ok", DurationMin: 30}); !errors.Is(err, boom) {
+	if _, err := catalog.NewService(failing{memstore.New().Catalog()}, nil).Create(ctx, catalog.Input{Name: "ok", DurationMin: 30}); !errors.Is(err, errBoom) {
 		t.Errorf("repository error not propagated: %v", err)
 	}
 }
@@ -176,11 +176,11 @@ func TestUpdate(t *testing.T) {
 
 	repo := memstore.New().Catalog()
 	_ = repo.Create(ctx, catalog.Item{ID: "6f1b1c3e-0b0e-4a53-9a43-3f0f0c1d2e3f", Name: "Cut", DurationMin: 30})
-	if _, err := catalog.NewService(updateFails{repo}, nil).Update(ctx, "6f1b1c3e-0b0e-4a53-9a43-3f0f0c1d2e3f", catalog.Patch{}); !errors.Is(err, boom) {
+	if _, err := catalog.NewService(updateFails{repo}, nil).Update(ctx, "6f1b1c3e-0b0e-4a53-9a43-3f0f0c1d2e3f", catalog.Patch{}); !errors.Is(err, errBoom) {
 		t.Errorf("repository error not propagated: %v", err)
 	}
 }
 
 type updateFails struct{ catalog.Repository }
 
-func (updateFails) Update(context.Context, catalog.Item) error { return boom }
+func (updateFails) Update(context.Context, catalog.Item) error { return errBoom }

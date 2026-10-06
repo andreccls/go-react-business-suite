@@ -17,8 +17,8 @@ import (
 )
 
 var (
-	ctx  = context.Background()
-	boom = errors.New("boom")
+	ctx     = context.Background()
+	errBoom = errors.New("boom")
 	// now = 2026-03-10 12:00 UTC (09:00 in São Paulo)
 	now = time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
 )
@@ -81,7 +81,7 @@ func TestSummaryKPIs(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := dashboard.Summary{
-		Period: dashboard.Period{From: "2026-03-05", To: "2026-03-07", Timezone: "America/Sao_Paulo"},
+		Period:            dashboard.Period{From: "2026-03-05", To: "2026-03-07", Timezone: "America/Sao_Paulo"},
 		AppointmentsTotal: 6, RevenueCents: 30000, AverageTicketCents: 10000,
 		CancellationRate: 0.1667, NoShowRate: 0.1667, NewCustomers: 1,
 		ByStatus: map[string]int{"scheduled": 1, "completed": 3, "cancelled": 1, "no_show": 1},
@@ -235,25 +235,25 @@ type brokenReader struct {
 
 func (b brokenReader) StatusTotals(ctx context.Context, f, t time.Time) (map[booking.Status]dashboard.StatusTotals, error) {
 	if b.failTotals {
-		return nil, boom
+		return nil, errBoom
 	}
 	return b.Reader.StatusTotals(ctx, f, t)
 }
 func (b brokenReader) NewCustomers(ctx context.Context, f, t time.Time) (int, error) {
 	if b.failNew {
-		return 0, boom
+		return 0, errBoom
 	}
 	return b.Reader.NewCustomers(ctx, f, t)
 }
 func (b brokenReader) Days(ctx context.Context, f, t time.Time, l *time.Location) ([]dashboard.Day, error) {
 	if b.failDays {
-		return nil, boom
+		return nil, errBoom
 	}
 	return b.Reader.Days(ctx, f, t, l)
 }
 func (b brokenReader) TopServices(ctx context.Context, f, t time.Time, n int) ([]dashboard.TopService, error) {
 	if b.failTop {
-		return nil, boom
+		return nil, errBoom
 	}
 	return b.Reader.TopServices(ctx, f, t, n)
 }
@@ -261,7 +261,7 @@ func (b brokenReader) TopServices(ctx context.Context, f, t time.Time, n int) ([
 type brokenUpcoming struct{}
 
 func (brokenUpcoming) Upcoming(context.Context, time.Time, int) ([]booking.Appointment, error) {
-	return nil, boom
+	return nil, errBoom
 }
 
 func TestStorageErrorsPropagate(t *testing.T) {
@@ -270,19 +270,19 @@ func TestStorageErrorsPropagate(t *testing.T) {
 		b.Reader = db.Dashboard()
 		return dashboard.NewService(b, brokenUpcoming{}, time.UTC, func() time.Time { return now })
 	}
-	if _, err := mk(brokenReader{failTotals: true}).Summary(ctx, "", ""); !errors.Is(err, boom) {
+	if _, err := mk(brokenReader{failTotals: true}).Summary(ctx, "", ""); !errors.Is(err, errBoom) {
 		t.Errorf("totals: %v", err)
 	}
-	if _, err := mk(brokenReader{failNew: true}).Summary(ctx, "", ""); !errors.Is(err, boom) {
+	if _, err := mk(brokenReader{failNew: true}).Summary(ctx, "", ""); !errors.Is(err, errBoom) {
 		t.Errorf("new customers: %v", err)
 	}
-	if _, err := mk(brokenReader{failDays: true}).Daily(ctx, "", ""); !errors.Is(err, boom) {
+	if _, err := mk(brokenReader{failDays: true}).Daily(ctx, "", ""); !errors.Is(err, errBoom) {
 		t.Errorf("days: %v", err)
 	}
-	if _, err := mk(brokenReader{failTop: true}).TopServices(ctx, "", "", 3); !errors.Is(err, boom) {
+	if _, err := mk(brokenReader{failTop: true}).TopServices(ctx, "", "", 3); !errors.Is(err, errBoom) {
 		t.Errorf("top: %v", err)
 	}
-	if _, err := mk(brokenReader{}).UpcomingAppointments(ctx, 3); !errors.Is(err, boom) {
+	if _, err := mk(brokenReader{}).UpcomingAppointments(ctx, 3); !errors.Is(err, errBoom) {
 		t.Errorf("upcoming: %v", err)
 	}
 }
