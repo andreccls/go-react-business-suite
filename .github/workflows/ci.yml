@@ -55,5 +55,48 @@ jobs:
       - name: Build the distroless image
         run: docker build -t studio-suite-api backend
 
-  # Stage 2 will add a `frontend` job here (install, typecheck, lint, test, build)
-  # and a compose smoke test of the whole stack.
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-fund --no-audit
+      - name: Lint (ESLint, jsx-a11y) and typecheck (tsc strict)
+        run: |
+          npm run lint
+          npm run typecheck
+      - name: Generated API types are up to date with backend/internal/httpapi/openapi.json
+        run: npm run check:api
+      - name: Tests with coverage gate (thresholds live in vite.config.ts)
+        run: npm run coverage
+      - name: Coverage summary
+        if: always()
+        run: |
+          node -e "const t=require('./coverage/coverage-summary.json').total;console.log('| metric | % |\n|---|---|\n'+['lines','statements','functions','branches'].map(k=>'| '+k+' | '+t[k].pct+' |').join('\n'))" >> "$GITHUB_STEP_SUMMARY"
+      - name: Production build
+        run: npm run build
+
+  # Builds every image and runs the Playwright flow (login -> service/customer -> booking -> 409 -> dashboard)
+  # against the FULL stack: nginx + API + PostgreSQL.
+  e2e:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start the stack
+        run: docker compose up -d --build --wait
+      - name: Playwright (official image, on the compose network)
+        run: ./e2e/run.sh
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail=100
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
