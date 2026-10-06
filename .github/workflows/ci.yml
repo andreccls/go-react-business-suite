@@ -28,7 +28,7 @@ jobs:
       REQUIRE_DB: "1"   # a skipped integration suite must fail the build
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
@@ -62,7 +62,7 @@ jobs:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
