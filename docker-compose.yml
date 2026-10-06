@@ -44,12 +44,22 @@ services:
       retries: 20
       start_period: 3s
 
-  # --- Stage 2 (not implemented yet): React frontend served by nginx, proxying /api ---
-  # frontend:
-  #   build: ./frontend
-  #   depends_on: [api]
-  #   ports:
-  #     - "127.0.0.1:${WEB_PORT:-8096}:80"
+  # React SPA served by unprivileged nginx, which also proxies /api to the API (same origin, no CORS).
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_BUSINESS_TZ: ${BUSINESS_TZ:-America/Sao_Paulo}
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8096}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   # Go toolchain used by the Makefile (no Go needed on the host).
   tools:
@@ -70,7 +80,26 @@ services:
       - gocache:/root/.cache/go-build
       - gomod:/go/pkg/mod
 
+  # Node toolchain used by the Makefile (no Node needed on the host). node_modules lives in a
+  # named volume so the host tree stays clean and installs are fast.
+  node:
+    image: node:22-alpine
+    profiles: ["tools"]
+    working_dir: /repo/frontend
+    ports:
+      - "127.0.0.1:${DEV_PORT:-5180}:5173"
+    environment:
+      API_PROXY_TARGET: http://api:8080
+      CI: "1"
+    volumes:
+      - ./frontend:/repo/frontend
+      - ./backend/internal/httpapi/openapi.json:/repo/backend/internal/httpapi/openapi.json:ro
+      - fe_node_modules:/repo/frontend/node_modules
+      - npmcache:/root/.npm
+
 volumes:
   pgdata:
   gocache:
   gomod:
+  fe_node_modules:
+  npmcache:
