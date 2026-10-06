@@ -1,0 +1,2769 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Studio Suite API",
+    "version": "1.0.0",
+    "description": "Backend of **go-react-business-suite**, a reference/sample project (NOT a production product): service catalog, customers, appointments on a single agenda, and a results dashboard for a small fictional studio.\n\n- **Auth:** `POST /v1/auth/login` returns a short-lived JWT (`Authorization: Bearer ...`) and a single-use refresh token. Roles: `admin`, `staff`.\n- **Errors:** RFC 9457 `application/problem+json` with a stable `code` and, for validation, a per-field `errors` list.\n- **Money** is an integer number of cents. **Instants** are RFC 3339 UTC; **calendar days** (filters, dashboard) are `YYYY-MM-DD` in the business time zone.\n- **Pagination:** `page` (1-based) + `page_size` (max 100); lists answer `{data, page, page_size, total}`.\n- **CORS** is configured by `CORS_ALLOWED_ORIGINS`; in production nginx serves the frontend and proxies `/api` here (this document describes the API paths as the service sees them, without the `/api` prefix).",
+    "license": {
+      "name": "MIT",
+      "url": "https://opensource.org/licenses/MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "Same origin as this document"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Health"
+    },
+    {
+      "name": "Auth"
+    },
+    {
+      "name": "Services"
+    },
+    {
+      "name": "Customers"
+    },
+    {
+      "name": "Appointments"
+    },
+    {
+      "name": "Dashboard"
+    }
+  ],
+  "paths": {
+    "/healthz": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "operationId": "healthz",
+        "summary": "Liveness",
+        "description": "The process is up. No auth.",
+        "responses": {
+          "200": {
+            "description": "Alive",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/readyz": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "operationId": "readyz",
+        "summary": "Readiness",
+        "description": "The database answers. No auth.",
+        "responses": {
+          "200": {
+            "description": "Ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Health"
+                    }
+                  ],
+                  "example": {
+                    "status": "ready"
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/auth/login": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "operationId": "login",
+        "summary": "Log in",
+        "description": "Rate limited per client IP (10/min by default).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Access + refresh token pair",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenPair"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "description": "Wrong e-mail or password (`invalid_credentials`). The same answer for an unknown e-mail.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/refresh": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "operationId": "refresh",
+        "summary": "Rotate the token pair",
+        "description": "Refresh tokens are single use. Presenting an already-used one is treated as theft: every refresh token of that user is revoked. Rate limited per client IP.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "A NEW access + refresh token pair; the presented refresh token is now spent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenPair"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "description": "Unknown, expired, used or revoked refresh token (`invalid_token`).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/logout": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "operationId": "logout",
+        "summary": "Log out (revoke a refresh token)",
+        "description": "Always 204. The access token stays valid until it expires (15 minutes by default); drop it on the client.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Revoked (idempotent: unknown tokens are ignored too)"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/auth/me": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "operationId": "me",
+        "summary": "Current user",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The authenticated user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/users": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "operationId": "createUser",
+        "summary": "Create a user (admin only)",
+        "description": "There is no public sign-up: the first admin comes from ADMIN_EMAIL/ADMIN_PASSWORD, the rest are created here.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewUserRequest"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "description": "E-mail already registered (`email_taken`).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "description": "Validation failed (`validation_failed`): `errors` lists each invalid field.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/services": {
+      "post": {
+        "tags": [
+          "Services"
+        ],
+        "operationId": "createService",
+        "summary": "Create a service",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceInput"
+              },
+              "example": {
+                "name": "Deep tissue massage",
+                "description": "Slow, firm pressure for chronic tension.",
+                "duration_min": 60,
+                "price_cents": 12000
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Service"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Path of the created resource."
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "description": "Validation failed (`validation_failed`): `errors` lists each invalid field.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Services"
+        ],
+        "operationId": "listServices",
+        "summary": "List services",
+        "parameters": [
+          {
+            "name": "active",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Filter by active/inactive; omit for both."
+          },
+          {
+            "$ref": "#/components/parameters/Query"
+          },
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of services, ordered by name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "description": "Validation failed (`validation_failed`): `errors` lists each invalid field.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/services/{id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/Id"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Services"
+        ],
+        "operationId": "getService",
+        "summary": "Get a service",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The service",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Service"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Service not found (`service_not_found`), or the id is malformed.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Services"
+        ],
+        "operationId": "updateService",
+        "summary": "Update a service (partial)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServicePatch"
+              },
+              "example": {
+                "price_cents": 13000
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The updated service",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Service"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Service not found (`service_not_found`), or the id is malformed.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "description": "Validation failed (`validation_failed`): `errors` lists each invalid field.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Services"
+        ],
+        "operationId": "deleteService",
+        "summary": "Delete a service (admin only)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Service not found (`service_not_found`), or the id is malformed.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Appointments reference it (`service_in_use`): deactivate it instead (PATCH `active: false`).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/customers": {
+      "post": {
+        "tags": [
+          "Customers"
+        ],
+        "operationId": "createCustomer",
+        "summary": "Create a customer",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerInput"
+              },
+              "example": {
+                "name": "Marina Duarte",
+                "email": "marina.duarte@example.com",
+                "phone": "(31) 99999-0000"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Customer"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Path of the created resource."
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "E-mail already registered (`email_taken`).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "description": "Validation failed (`validation_failed`): `errors` lists each invalid field.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Customers"
+        ],
+        "operationId": "listCustomers",
+        "summary": "List customers",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Query"
+          },
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of customers, ordered by name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "description": "Validation failed (`validation_failed`): `errors` lists each invalid field.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/customers/{id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/Id"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Customers"
+        ],
+        "operationId": "getCustomer",
+        "summary": "Get a customer",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The customer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Customer"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Customer not found (`customer_not_found`), or the id is malformed.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Customers"
+        ],
+        "operationId": "updateCustomer",
+        "summary": "Update a customer (partial)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerPatch"
+              },
+              "example": {
+                "notes": "Allergic to lavender."
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The updated customer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Customer"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Customer not found (`customer_not_found`), or the id is malformed.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "E-mail already registered (`email_taken`).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "description": "Validation failed (`validation_failed`): `errors` lists each invalid field.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Customers"
+        ],
+        "operationId": "deleteCustomer",
+        "summary": "Delete a customer (admin only)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Customer not found (`customer_not_found`), or the id is malformed.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The customer has appointments (`customer_in_use`).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/appointments": {
+      "post": {
+        "tags": [
+          "Appointments"
+        ],
+        "operationId": "createAppointment",
+        "summary": "Book an appointment",
+        "description": "The single agenda cannot hold overlapping appointments; this is enforced atomically by the database, so of N simultaneous requests for one slot exactly one succeeds and the rest get 409.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppointmentInput"
+              },
+              "example": {
+                "customer_id": "9a4e2d10-7b3c-4c55-8f61-2d7a6b5c2222",
+                "service_id": "3f6b1c7e-5d0a-4a52-9d2e-1c0b7e0a1111",
+                "starts_at": "2026-10-07T14:00:00-03:00"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Booked: status `scheduled`, `ends_at` derived, name/duration/price snapshotted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Appointment"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Path of the created resource."
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "The slot overlaps another appointment (`slot_unavailable`), or the customer/service was just removed (`unknown_reference`).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "description": "Validation failed (`validation_failed`: past start, unknown customer/service, malformed ids) or the service is inactive (`service_inactive`).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Appointments"
+        ],
+        "operationId": "listAppointments",
+        "summary": "List appointments",
+        "description": "`from`/`to` filter on the start day (business time zone, inclusive); both optional. Calendar view: ask for one week and sort is already by start.",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/AppointmentStatus"
+            }
+          },
+          {
+            "name": "customer_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/From"
+          },
+          {
+            "$ref": "#/components/parameters/To"
+          },
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of appointments, ordered by start time (ascending)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppointmentList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "description": "Validation failed (`validation_failed`): `errors` lists each invalid field.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/appointments/{id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/Id"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Appointments"
+        ],
+        "operationId": "getAppointment",
+        "summary": "Get an appointment",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The appointment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Appointment"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Appointment not found (`appointment_not_found`), or the id is malformed.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/appointments/{id}/status": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/Id"
+        }
+      ],
+      "patch": {
+        "tags": [
+          "Appointments"
+        ],
+        "operationId": "setAppointmentStatus",
+        "summary": "Change the status",
+        "description": "`cancelled` and `no_show` free the time slot; `completed` keeps it.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StatusInput"
+              },
+              "example": {
+                "status": "completed"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The updated appointment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Appointment"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Appointment not found (`appointment_not_found`), or the id is malformed.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not allowed from the current status (`invalid_transition`: only `scheduled` moves), or `completed`/`no_show` before the start time (`not_started`).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "description": "Unknown status value (`validation_failed`).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/dashboard/summary": {
+      "get": {
+        "tags": [
+          "Dashboard"
+        ],
+        "operationId": "dashboardSummary",
+        "summary": "KPIs of a period",
+        "description": "All counts refer to appointments that START in the period. Omit `from`/`to` for the last 30 days ending today (business time zone).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/From"
+          },
+          {
+            "$ref": "#/components/parameters/To"
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "KPIs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Summary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "description": "Validation failed (`validation_failed`): `errors` lists each invalid field.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/dashboard/daily": {
+      "get": {
+        "tags": [
+          "Dashboard"
+        ],
+        "operationId": "dashboardDaily",
+        "summary": "Daily series",
+        "description": "Days are calendar days in the business time zone. Omit `from`/`to` for the last 30 days ending today (business time zone).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/From"
+          },
+          {
+            "$ref": "#/components/parameters/To"
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One point per day, zero-filled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DailySeries"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "description": "Validation failed (`validation_failed`): `errors` lists each invalid field.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/dashboard/top-services": {
+      "get": {
+        "tags": [
+          "Dashboard"
+        ],
+        "operationId": "dashboardTopServices",
+        "summary": "Top services",
+        "description": "Ordered by realized revenue (completed), then completed count, then total appointments, then name. Omit `from`/`to` for the last 30 days ending today (business time zone).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/From"
+          },
+          {
+            "$ref": "#/components/parameters/To"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The ranking",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ranking"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "description": "Validation failed (`validation_failed`): `errors` lists each invalid field.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/dashboard/upcoming": {
+      "get": {
+        "tags": [
+          "Dashboard"
+        ],
+        "operationId": "dashboardUpcoming",
+        "summary": "Upcoming appointments",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Scheduled appointments from now on, soonest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpcomingList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "description": "Validation failed (`validation_failed`): `errors` lists each invalid field.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "parameters": {
+      "Id": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "description": "Resource id. A malformed id answers 404, like an unknown one."
+      },
+      "Page": {
+        "name": "page",
+        "in": "query",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1
+        }
+      },
+      "PageSize": {
+        "name": "page_size",
+        "in": "query",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 20
+        }
+      },
+      "Query": {
+        "name": "q",
+        "in": "query",
+        "schema": {
+          "type": "string"
+        },
+        "description": "Case-insensitive substring search (literal text; `%` and `_` have no special meaning)."
+      },
+      "From": {
+        "name": "from",
+        "in": "query",
+        "schema": {
+          "type": "string",
+          "format": "date"
+        },
+        "example": "2026-10-01",
+        "description": "First day, inclusive, `YYYY-MM-DD` in the business time zone."
+      },
+      "To": {
+        "name": "to",
+        "in": "query",
+        "schema": {
+          "type": "string",
+          "format": "date"
+        },
+        "example": "2026-10-31",
+        "description": "Last day, inclusive. `from`..`to` may span at most 366 days."
+      },
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20,
+          "default": 5
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "The body is not valid JSON for this endpoint (`invalid_json`).",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Missing or invalid access token (`missing_token`, `invalid_token`); on login/refresh: `invalid_credentials` / `invalid_token`.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        },
+        "headers": {
+          "WWW-Authenticate": {
+            "schema": {
+              "type": "string",
+              "example": "Bearer realm=\"api\""
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "The role is not allowed to do this (`forbidden`): admin only.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "PayloadTooLarge": {
+        "description": "Body larger than 1 MiB (`body_too_large`).",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "UnsupportedMediaType": {
+        "description": "Content-Type must be `application/json` (`unsupported_media_type`).",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "TooManyRequests": {
+        "description": "Rate limit exceeded (`rate_limited`); see Retry-After.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        },
+        "headers": {
+          "Retry-After": {
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Seconds until a request is allowed again."
+          }
+        }
+      },
+      "InternalError": {
+        "description": "Unexpected error (`internal_error`); the cause is logged, never returned. Quote `request_id`.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "Unavailable": {
+        "description": "The request exceeded its time budget (`timeout`) or a dependency is down (`not_ready`).",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "FieldError": {
+        "type": "object",
+        "properties": {
+          "field": {
+            "type": "string",
+            "example": "starts_at",
+            "description": "Name of the offending field (dotted for nested ones)."
+          },
+          "message": {
+            "type": "string",
+            "example": "must be in the future"
+          }
+        },
+        "required": [
+          "field",
+          "message"
+        ],
+        "additionalProperties": false
+      },
+      "Problem": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "about:blank"
+            ],
+            "description": "Always `about:blank`: the HTTP status says it all; branch on `code`."
+          },
+          "title": {
+            "type": "string",
+            "example": "Conflict",
+            "description": "The HTTP reason phrase."
+          },
+          "status": {
+            "type": "integer",
+            "example": 409
+          },
+          "detail": {
+            "type": "string",
+            "example": "That time slot overlaps another appointment."
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "invalid_json",
+              "validation_failed",
+              "body_too_large",
+              "unsupported_media_type",
+              "missing_token",
+              "invalid_token",
+              "invalid_credentials",
+              "forbidden",
+              "rate_limited",
+              "route_not_found",
+              "customer_not_found",
+              "service_not_found",
+              "appointment_not_found",
+              "email_taken",
+              "customer_in_use",
+              "service_in_use",
+              "slot_unavailable",
+              "invalid_transition",
+              "not_started",
+              "unknown_reference",
+              "service_inactive",
+              "timeout",
+              "not_ready",
+              "internal_error"
+            ],
+            "example": "slot_unavailable",
+            "description": "Stable machine-readable error code."
+          },
+          "request_id": {
+            "type": "string",
+            "example": "5d1c1f1e-0a47-4c3c-a6c5-0f3d0f5f9b21",
+            "description": "Same value as the X-Request-ID response header."
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FieldError"
+            },
+            "description": "Present on `validation_failed` (422): one entry per invalid field."
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "code"
+        ],
+        "additionalProperties": false,
+        "description": "RFC 9457 problem details (`application/problem+json`).",
+        "example": {
+          "type": "about:blank",
+          "title": "Conflict",
+          "status": 409,
+          "detail": "That time slot overlaps another appointment.",
+          "code": "slot_unavailable",
+          "request_id": "5d1c1f1e-0a47-4c3c-a6c5-0f3d0f5f9b21"
+        }
+      },
+      "Health": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "example": "ok"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "Role": {
+        "type": "string",
+        "enum": [
+          "admin",
+          "staff"
+        ],
+        "description": "`admin` can also delete services/customers and create users; `staff` cannot remove anything."
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "example": "0b7e9a51-2c3d-4e6f-8a90-b1c2d3e4f444"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "example": "admin@example.com"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "role"
+        ],
+        "additionalProperties": false
+      },
+      "LoginRequest": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "example": "admin@example.com"
+          },
+          "password": {
+            "type": "string",
+            "format": "password",
+            "example": "dev-only-admin-password"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "additionalProperties": false
+      },
+      "RefreshRequest": {
+        "type": "object",
+        "properties": {
+          "refresh_token": {
+            "type": "string",
+            "example": "Zm9vYmFyLXJlZnJlc2gtdG9rZW4tZXhhbXBsZS0wMDAwMDAwMDAwMDA"
+          }
+        },
+        "required": [
+          "refresh_token"
+        ],
+        "additionalProperties": false
+      },
+      "TokenPair": {
+        "type": "object",
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "description": "JWT (HS256), valid for `expires_in` seconds. Send as `Authorization: Bearer <token>`."
+          },
+          "token_type": {
+            "type": "string",
+            "enum": [
+              "Bearer"
+            ]
+          },
+          "expires_in": {
+            "type": "integer",
+            "example": 900,
+            "description": "Access token lifetime in seconds."
+          },
+          "refresh_token": {
+            "type": "string",
+            "description": "Opaque, single use: every refresh returns a NEW pair and invalidates this token. Reusing an old one revokes all the user's sessions."
+          }
+        },
+        "required": [
+          "access_token",
+          "token_type",
+          "expires_in",
+          "refresh_token"
+        ],
+        "additionalProperties": false
+      },
+      "NewUserRequest": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "example": "reception@example.com"
+          },
+          "password": {
+            "type": "string",
+            "format": "password",
+            "minLength": 8,
+            "maxLength": 72,
+            "example": "a-long-enough-password"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          }
+        },
+        "required": [
+          "email",
+          "password",
+          "role"
+        ],
+        "additionalProperties": false
+      },
+      "Service": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "example": "3f6b1c7e-5d0a-4a52-9d2e-1c0b7e0a1111"
+          },
+          "name": {
+            "type": "string",
+            "example": "Deep tissue massage"
+          },
+          "description": {
+            "type": "string",
+            "example": "Slow, firm pressure for chronic tension."
+          },
+          "duration_min": {
+            "type": "integer",
+            "example": 60,
+            "description": "Duration in minutes."
+          },
+          "price_cents": {
+            "type": "integer",
+            "example": 12000,
+            "description": "Price in cents of the (single) currency. Never a float."
+          },
+          "active": {
+            "type": "boolean",
+            "example": true,
+            "description": "Inactive services cannot be booked (existing appointments are unaffected)."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-10-01T12:00:00Z"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-10-01T12:00:00Z"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "duration_min",
+          "price_cents",
+          "active",
+          "created_at",
+          "updated_at"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "id": "3f6b1c7e-5d0a-4a52-9d2e-1c0b7e0a1111",
+          "name": "Deep tissue massage",
+          "description": "Slow, firm pressure for chronic tension.",
+          "duration_min": 60,
+          "price_cents": 12000,
+          "active": true,
+          "created_at": "2026-10-01T12:00:00Z",
+          "updated_at": "2026-10-01T12:00:00Z"
+        }
+      },
+      "ServiceInput": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 120,
+            "example": "Deep tissue massage"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500,
+            "example": "Slow, firm pressure for chronic tension."
+          },
+          "duration_min": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 480,
+            "example": 60
+          },
+          "price_cents": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000000,
+            "example": 12000
+          },
+          "active": {
+            "type": "boolean",
+            "example": true,
+            "description": "Optional; defaults to true."
+          }
+        },
+        "required": [
+          "name",
+          "duration_min",
+          "price_cents"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "name": "Deep tissue massage",
+          "description": "Slow, firm pressure for chronic tension.",
+          "duration_min": 60,
+          "price_cents": 12000
+        }
+      },
+      "ServicePatch": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 120
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "duration_min": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 480
+          },
+          "price_cents": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000000
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [],
+        "additionalProperties": false,
+        "description": "Partial update: send only the fields to change. Editing price/duration never alters existing appointments (they hold a snapshot).",
+        "example": {
+          "price_cents": 13000
+        }
+      },
+      "Customer": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "example": "9a4e2d10-7b3c-4c55-8f61-2d7a6b5c2222"
+          },
+          "name": {
+            "type": "string",
+            "example": "Marina Duarte"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "example": "marina.duarte@example.com",
+            "description": "Lower-cased; unique."
+          },
+          "phone": {
+            "type": "string",
+            "example": "31999990000",
+            "description": "Digits only (empty when not given)."
+          },
+          "notes": {
+            "type": "string",
+            "example": "Prefers a quiet room."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-10-01T12:05:00Z"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-10-01T12:05:00Z"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "email",
+          "phone",
+          "notes",
+          "created_at",
+          "updated_at"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "id": "9a4e2d10-7b3c-4c55-8f61-2d7a6b5c2222",
+          "name": "Marina Duarte",
+          "email": "marina.duarte@example.com",
+          "phone": "31999990000",
+          "notes": "Prefers a quiet room.",
+          "created_at": "2026-10-01T12:05:00Z",
+          "updated_at": "2026-10-01T12:05:00Z"
+        }
+      },
+      "CustomerInput": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 120,
+            "example": "Marina Duarte"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "example": "marina.duarte@example.com"
+          },
+          "phone": {
+            "type": "string",
+            "example": "(31) 99999-0000",
+            "description": "Optional; 10 to 13 digits, formatting characters are accepted and stripped."
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 1000,
+            "example": "Prefers a quiet room."
+          }
+        },
+        "required": [
+          "name",
+          "email"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "name": "Marina Duarte",
+          "email": "marina.duarte@example.com",
+          "phone": "(31) 99999-0000"
+        }
+      },
+      "CustomerPatch": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 120
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "phone": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 1000
+          }
+        },
+        "required": [],
+        "additionalProperties": false,
+        "description": "Partial update: send only the fields to change.",
+        "example": {
+          "notes": "Allergic to lavender."
+        }
+      },
+      "AppointmentStatus": {
+        "type": "string",
+        "enum": [
+          "scheduled",
+          "completed",
+          "cancelled",
+          "no_show"
+        ],
+        "description": "`scheduled` -> `completed` | `cancelled` | `no_show`. The last three are terminal."
+      },
+      "Appointment": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "example": "c1d2e3f4-a5b6-4c78-9d01-e2f3a4b5c333"
+          },
+          "customer_id": {
+            "type": "string",
+            "format": "uuid",
+            "example": "9a4e2d10-7b3c-4c55-8f61-2d7a6b5c2222"
+          },
+          "customer_name": {
+            "type": "string",
+            "example": "Marina Duarte",
+            "description": "Current name of the customer (read-model field)."
+          },
+          "service_id": {
+            "type": "string",
+            "format": "uuid",
+            "example": "3f6b1c7e-5d0a-4a52-9d2e-1c0b7e0a1111"
+          },
+          "service_name": {
+            "type": "string",
+            "example": "Deep tissue massage",
+            "description": "SNAPSHOT of the service name at booking time."
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-10-07T17:00:00Z",
+            "description": "UTC instant. Show it in the business time zone (`timezone` in dashboard responses)."
+          },
+          "ends_at": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-10-07T18:00:00Z",
+            "description": "`starts_at` + `duration_min`. Intervals are half-open: back-to-back appointments do not conflict."
+          },
+          "duration_min": {
+            "type": "integer",
+            "example": 60,
+            "description": "SNAPSHOT of the service duration at booking time."
+          },
+          "price_cents": {
+            "type": "integer",
+            "example": 12000,
+            "description": "SNAPSHOT of the service price at booking time."
+          },
+          "status": {
+            "$ref": "#/components/schemas/AppointmentStatus"
+          },
+          "notes": {
+            "type": "string",
+            "example": "Prefers a quiet room."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-10-06T13:20:41.123456Z"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-10-06T13:20:41.123456Z"
+          }
+        },
+        "required": [
+          "id",
+          "customer_id",
+          "customer_name",
+          "service_id",
+          "service_name",
+          "starts_at",
+          "ends_at",
+          "duration_min",
+          "price_cents",
+          "status",
+          "notes",
+          "created_at",
+          "updated_at"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "id": "c1d2e3f4-a5b6-4c78-9d01-e2f3a4b5c333",
+          "customer_id": "9a4e2d10-7b3c-4c55-8f61-2d7a6b5c2222",
+          "customer_name": "Marina Duarte",
+          "service_id": "3f6b1c7e-5d0a-4a52-9d2e-1c0b7e0a1111",
+          "service_name": "Deep tissue massage",
+          "starts_at": "2026-10-07T17:00:00Z",
+          "ends_at": "2026-10-07T18:00:00Z",
+          "duration_min": 60,
+          "price_cents": 12000,
+          "status": "scheduled",
+          "notes": "Prefers a quiet room.",
+          "created_at": "2026-10-06T13:20:41.123456Z",
+          "updated_at": "2026-10-06T13:20:41.123456Z"
+        }
+      },
+      "AppointmentInput": {
+        "type": "object",
+        "properties": {
+          "customer_id": {
+            "type": "string",
+            "format": "uuid",
+            "example": "9a4e2d10-7b3c-4c55-8f61-2d7a6b5c2222"
+          },
+          "service_id": {
+            "type": "string",
+            "format": "uuid",
+            "example": "3f6b1c7e-5d0a-4a52-9d2e-1c0b7e0a1111",
+            "description": "Must be an ACTIVE service."
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-10-07T14:00:00-03:00",
+            "description": "RFC 3339, must be in the future. Any offset is accepted; it is stored as UTC."
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 500,
+            "example": "Prefers a quiet room."
+          }
+        },
+        "required": [
+          "customer_id",
+          "service_id",
+          "starts_at"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "customer_id": "9a4e2d10-7b3c-4c55-8f61-2d7a6b5c2222",
+          "service_id": "3f6b1c7e-5d0a-4a52-9d2e-1c0b7e0a1111",
+          "starts_at": "2026-10-07T14:00:00-03:00"
+        }
+      },
+      "StatusInput": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AppointmentStatus"
+              }
+            ],
+            "description": "Target status: `completed`, `no_show` (only once the appointment has started) or `cancelled`."
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "status": "completed"
+        }
+      },
+      "Summary": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-10-01",
+            "description": "First day (inclusive), business time zone."
+          },
+          "to": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-10-31",
+            "description": "Last day (inclusive)."
+          },
+          "timezone": {
+            "type": "string",
+            "example": "America/Sao_Paulo"
+          },
+          "appointments_total": {
+            "type": "integer",
+            "example": 42,
+            "description": "All appointments that START in the period, any status."
+          },
+          "by_status": {
+            "type": "object",
+            "properties": {
+              "scheduled": {
+                "type": "integer",
+                "example": 10
+              },
+              "completed": {
+                "type": "integer",
+                "example": 25
+              },
+              "cancelled": {
+                "type": "integer",
+                "example": 4
+              },
+              "no_show": {
+                "type": "integer",
+                "example": 3
+              }
+            },
+            "required": [
+              "scheduled",
+              "completed",
+              "cancelled",
+              "no_show"
+            ],
+            "additionalProperties": false
+          },
+          "revenue_cents": {
+            "type": "integer",
+            "example": 310000,
+            "description": "REALIZED revenue: sum of the frozen prices of `completed` appointments."
+          },
+          "average_ticket_cents": {
+            "type": "integer",
+            "example": 12400,
+            "description": "revenue_cents / completed, rounded to the cent (0 when there are none)."
+          },
+          "cancellation_rate": {
+            "type": "number",
+            "example": 0.0952,
+            "description": "cancelled / appointments_total, 0..1, 4 decimals (0 when there are none)."
+          },
+          "no_show_rate": {
+            "type": "number",
+            "example": 0.0714,
+            "description": "no_show / appointments_total, 0..1, 4 decimals (0 when there are none)."
+          },
+          "new_customers": {
+            "type": "integer",
+            "example": 7,
+            "description": "Customers registered in the period."
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "timezone",
+          "appointments_total",
+          "by_status",
+          "revenue_cents",
+          "average_ticket_cents",
+          "cancellation_rate",
+          "no_show_rate",
+          "new_customers"
+        ],
+        "additionalProperties": false
+      },
+      "Day": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-10-05"
+          },
+          "appointments": {
+            "type": "integer",
+            "example": 5,
+            "description": "All statuses."
+          },
+          "completed": {
+            "type": "integer",
+            "example": 3
+          },
+          "revenue_cents": {
+            "type": "integer",
+            "example": 36000,
+            "description": "Completed only."
+          }
+        },
+        "required": [
+          "date",
+          "appointments",
+          "completed",
+          "revenue_cents"
+        ],
+        "additionalProperties": false
+      },
+      "DailySeries": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-10-01"
+          },
+          "to": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-10-31"
+          },
+          "timezone": {
+            "type": "string",
+            "example": "America/Sao_Paulo"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Day"
+            },
+            "description": "One point per calendar day of the period, zero-filled (no holes), ascending."
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "timezone",
+          "data"
+        ],
+        "additionalProperties": false
+      },
+      "TopService": {
+        "type": "object",
+        "properties": {
+          "service_id": {
+            "type": "string",
+            "format": "uuid",
+            "example": "3f6b1c7e-5d0a-4a52-9d2e-1c0b7e0a1111"
+          },
+          "name": {
+            "type": "string",
+            "example": "Deep tissue massage"
+          },
+          "appointments": {
+            "type": "integer",
+            "example": 14,
+            "description": "All statuses."
+          },
+          "completed": {
+            "type": "integer",
+            "example": 11
+          },
+          "revenue_cents": {
+            "type": "integer",
+            "example": 132000,
+            "description": "Completed only."
+          }
+        },
+        "required": [
+          "service_id",
+          "name",
+          "appointments",
+          "completed",
+          "revenue_cents"
+        ],
+        "additionalProperties": false
+      },
+      "Ranking": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-10-01"
+          },
+          "to": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-10-31"
+          },
+          "timezone": {
+            "type": "string",
+            "example": "America/Sao_Paulo"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TopService"
+            },
+            "description": "Ordered by realized revenue, then completed, then appointments, then name."
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "timezone",
+          "data"
+        ],
+        "additionalProperties": false
+      },
+      "UpcomingList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Appointment"
+            },
+            "description": "Scheduled appointments from now on, soonest first."
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "additionalProperties": false
+      },
+      "ServiceList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Service"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "example": 1
+          },
+          "page_size": {
+            "type": "integer",
+            "example": 20
+          },
+          "total": {
+            "type": "integer",
+            "example": 12,
+            "description": "Total matches across all pages."
+          }
+        },
+        "required": [
+          "data",
+          "page",
+          "page_size",
+          "total"
+        ],
+        "additionalProperties": false
+      },
+      "CustomerList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Customer"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "example": 1
+          },
+          "page_size": {
+            "type": "integer",
+            "example": 20
+          },
+          "total": {
+            "type": "integer",
+            "example": 57,
+            "description": "Total matches across all pages."
+          }
+        },
+        "required": [
+          "data",
+          "page",
+          "page_size",
+          "total"
+        ],
+        "additionalProperties": false
+      },
+      "AppointmentList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Appointment"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "example": 1
+          },
+          "page_size": {
+            "type": "integer",
+            "example": 20
+          },
+          "total": {
+            "type": "integer",
+            "example": 31,
+            "description": "Total matches across all pages."
+          }
+        },
+        "required": [
+          "data",
+          "page",
+          "page_size",
+          "total"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}
