@@ -78,8 +78,10 @@ export function CustomersPage() {
                   {list.data.data.map((c) => (
                     <tr key={c.id}>
                       <td data-label="Cliente">
-                        <strong>{c.name}</strong>
-                        <div className="muted">{c.email}</div>
+                        <div>
+                          <strong>{c.name}</strong>
+                          <div className="muted">{c.email}</div>
+                        </div>
                       </td>
                       <td data-label="Telefone">{c.phone ? formatPhone(c.phone) : '—'}</td>
                       <td data-label="Cadastro">{formatDate(c.created_at)}</td>

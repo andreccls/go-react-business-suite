@@ -25,7 +25,11 @@ export function Layout() {
           </nav>
           <div className="user-box">
             <span>
-              {user.email} · <span className={`badge badge-${user.role}`}>{ROLE_LABEL[user.role]}</span>
+              <span className="user-email" title={user.email}>
+                {user.email}
+                <span aria-hidden="true"> · </span>
+              </span>
+              <span className={`badge badge-${user.role}`}>{ROLE_LABEL[user.role]}</span>
             </span>
             <button type="button" className="btn btn-small" onClick={() => void logout()}>
               Sair

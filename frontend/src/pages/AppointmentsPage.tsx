@@ -131,11 +131,18 @@ export function AppointmentsPage() {
                     return (
                       <tr key={a.id}>
                         <td data-label="Início">
-                          <strong>{formatDate(a.starts_at)}</strong> {formatTime(a.starts_at)}–{formatTime(a.ends_at)}
+                          <div>
+                            <strong>{formatDate(a.starts_at)}</strong>
+                            <div className="muted">
+                              {formatTime(a.starts_at)}–{formatTime(a.ends_at)}
+                            </div>
+                          </div>
                         </td>
                         <td data-label="Cliente">{a.customer_name}</td>
                         <td data-label="Serviço">
-                          {a.service_name} <span className="muted">· {formatDuration(a.duration_min)}</span>
+                          <div>
+                            {a.service_name} <span className="muted">· {formatDuration(a.duration_min)}</span>
+                          </div>
                         </td>
                         <td data-label="Valor" className="num">
                           {formatMoney(a.price_cents)}

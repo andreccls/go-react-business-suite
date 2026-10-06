@@ -110,8 +110,10 @@ export function ServicesPage() {
                   {list.data.data.map((s) => (
                     <tr key={s.id}>
                       <td data-label="Serviço">
-                        <strong>{s.name}</strong>
-                        {s.description ? <div className="muted">{s.description}</div> : null}
+                        <div>
+                          <strong>{s.name}</strong>
+                          {s.description ? <div className="muted">{s.description}</div> : null}
+                        </div>
                       </td>
                       <td data-label="Duração">{formatDuration(s.duration_min)}</td>
                       <td data-label="Preço" className="num">
