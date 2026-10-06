@@ -44,12 +44,29 @@ const (
 	MaxLimit     = 20
 )
 
+// Period echoes the (inclusive) dates a result refers to, after the defaults were applied.
+type Period struct {
+	From     string `json:"from"`
+	To       string `json:"to"`
+	Timezone string `json:"timezone"`
+}
+
+// DailySeries is the day-by-day series of a period.
+type DailySeries struct {
+	Period
+	Data []Day `json:"data"`
+}
+
+// Ranking is the top-services ranking of a period.
+type Ranking struct {
+	Period
+	Data []TopService `json:"data"`
+}
+
 // Summary holds the KPIs of a period. Rates are ratios in [0, 1] (4 decimals) over
 // ALL appointments that start in the period.
 type Summary struct {
-	From               string         `json:"from"`
-	To                 string         `json:"to"`
-	Timezone           string         `json:"timezone"`
+	Period
 	AppointmentsTotal  int            `json:"appointments_total"`
 	ByStatus           map[string]int `json:"by_status"`
 	RevenueCents       int            `json:"revenue_cents"`
@@ -92,13 +109,14 @@ func NewService(r Reader, u Upcoming, loc *time.Location, now func() time.Time) 
 	return &Service{reader: r, upcoming: u, loc: loc, now: now}
 }
 
-func (s *Service) parse(from, to string) (period.Range, error) {
-	return period.Parse(from, to, s.loc, s.now(), DefaultDays)
+func (s *Service) parse(from, to string) (period.Range, Period, error) {
+	r, err := period.Parse(from, to, s.loc, s.now(), DefaultDays)
+	return r, Period{From: r.FromDay, To: r.ToDay, Timezone: s.loc.String()}, err
 }
 
 // Summary returns the KPIs of [from, to] (dates; defaults to the last 30 days).
 func (s *Service) Summary(ctx context.Context, from, to string) (Summary, error) {
-	r, err := s.parse(from, to)
+	r, p, err := s.parse(from, to)
 	if err != nil {
 		return Summary{}, err
 	}
@@ -110,7 +128,7 @@ func (s *Service) Summary(ctx context.Context, from, to string) (Summary, error)
 	if err != nil {
 		return Summary{}, err
 	}
-	sum := Summary{From: r.FromDay, To: r.ToDay, Timezone: s.loc.String(), NewCustomers: newCust, ByStatus: map[string]int{}}
+	sum := Summary{Period: p, NewCustomers: newCust, ByStatus: map[string]int{}}
 	for _, st := range []booking.Status{booking.Scheduled, booking.Completed, booking.Cancelled, booking.NoShow} {
 		sum.ByStatus[string(st)] = totals[st].Count
 		sum.AppointmentsTotal += totals[st].Count
@@ -131,14 +149,14 @@ func ratio(n, d int) float64 { return math.Round(float64(n)/float64(d)*10000) / 
 
 // Daily returns one point per calendar day of the period (zero-filled), so a chart
 // never has holes.
-func (s *Service) Daily(ctx context.Context, from, to string) ([]Day, error) {
-	r, err := s.parse(from, to)
+func (s *Service) Daily(ctx context.Context, from, to string) (DailySeries, error) {
+	r, p, err := s.parse(from, to)
 	if err != nil {
-		return nil, err
+		return DailySeries{}, err
 	}
 	rows, err := s.reader.Days(ctx, r.From, r.To, s.loc)
 	if err != nil {
-		return nil, err
+		return DailySeries{}, err
 	}
 	byDate := make(map[string]Day, len(rows))
 	for _, row := range rows {
@@ -152,14 +170,14 @@ func (s *Service) Daily(ctx context.Context, from, to string) ([]Day, error) {
 		row.Date = key
 		days = append(days, row)
 	}
-	return days, nil
+	return DailySeries{Period: p, Data: days}, nil
 }
 
 // TopServices ranks the services of the period (limit 1..20, default 5).
-func (s *Service) TopServices(ctx context.Context, from, to string, limit int) ([]TopService, error) {
-	r, err := s.parse(from, to)
+func (s *Service) TopServices(ctx context.Context, from, to string, limit int) (Ranking, error) {
+	r, p, err := s.parse(from, to)
 	if err != nil {
-		return nil, err
+		return Ranking{}, err
 	}
 	if limit == 0 {
 		limit = DefaultLimit
@@ -167,16 +185,11 @@ func (s *Service) TopServices(ctx context.Context, from, to string, limit int) (
 	if limit < 1 || limit > MaxLimit {
 		var v validation.Errors
 		v.Add("limit", "must be between 1 and 20")
-		return nil, v
+		return Ranking{}, v
 	}
+	// The Reader contract: never nil, so the JSON is [] and not null.
 	rows, err := s.reader.TopServices(ctx, r.From, r.To, limit)
-	if err != nil {
-		return nil, err
-	}
-	if rows == nil {
-		rows = []TopService{}
-	}
-	return rows, nil
+	return Ranking{Period: p, Data: rows}, err
 }
 
 // UpcomingAppointments returns the next scheduled appointments (limit 1..20, default 5).
@@ -189,9 +202,5 @@ func (s *Service) UpcomingAppointments(ctx context.Context, limit int) ([]bookin
 		v.Add("limit", "must be between 1 and 20")
 		return nil, v
 	}
-	out, err := s.upcoming.Upcoming(ctx, s.now().UTC(), limit)
-	if out == nil {
-		out = []booking.Appointment{}
-	}
-	return out, err
+	return s.upcoming.Upcoming(ctx, s.now().UTC(), limit)
 }
