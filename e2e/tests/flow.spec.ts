@@ -156,7 +156,8 @@ test('phone: no page needs horizontal scrolling', async ({ browser }) => {
   for (const [link, heading] of [['Painel', 'Painel de resultados'], ['Agenda', 'Agenda'], ['Serviços', 'Serviços'], ['Clientes', 'Clientes'], ['Usuários', 'Usuários']] as const) {
     await page.getByRole('link', { name: link, exact: true }).click()
     await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible()
-    await expect(page.getByRole('status').or(page.getByRole('table')).or(page.getByRole('heading', { name: 'Novo usuário' })).first()).toBeVisible()
+    // wait until every loading placeholder (role=status) is gone; empty states have no role, so do not require data
+    await expect(page.getByRole('status')).toHaveCount(0)
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
     expect(overflow, `${link}: page is wider than the viewport`).toBeLessThanOrEqual(0)
   }
